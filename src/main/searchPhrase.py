@@ -1,20 +1,48 @@
 ## Import statements
 
 from pyspark import SparkConf, SparkContext
-import re
+
 import ast
 import itertools
-from operator import add
-import sys
-from pyspark.sql.functions import udf
-from pyspark.sql.types import StringType
-import string
 from pyspark.sql.functions import *
 
 ## Constants
 APP_NAME = "Search Inverted Index"
 
+def uni_to_clean_str(text):
+    converted_str = text.encode('utf-8')
+    return converted_str.lower()
 
+
+def tokenize_to_words(text):
+    # split into words
+    tokens = word_tokenize(text)
+    # remove punctuation from each word
+    # table = str.maketrans(",", string.punctuation)
+    # stripped = [w.translate(table) for w in tokens]
+    # remove all tokens that are not alphabetic
+    words = [word for word in tokens if word.isalpha()]
+    stemmed_words = stemmer(words)
+    return remove_stopwords(stemmed_words)
+
+
+def remove_stopwords(words):
+    # filter out stop words
+    stop_words = set(stopwords.words('english'))
+    words = [w for w in words if not w in stop_words]
+    return words
+
+
+# stemming of words
+def stemmer(tokens):
+    porter = PorterStemmer()
+    stemmed = [porter.stem(word).encode('utf-8') for word in tokens]
+    return stemmed
+
+
+def token_to_doc(token_list, doc_name):
+    token_to_doc_map = [(token[1], [(doc_name,[token[0]])]) for token in token_list]
+    return token_to_doc_map
 # Search Logic finding intersection of locations of multiple words in a phrase
 def find_locations(s):
     finalList = [];

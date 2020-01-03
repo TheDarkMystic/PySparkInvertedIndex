@@ -1,27 +1,17 @@
 ## Import libraries
 
 import string
-from pprint import pprint
-
-from pyspark import SparkConf,SparkContext
+import pprint
+from pyspark import SparkConf, SparkContext
 from pyspark.sql.functions import *
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-import string
 from nltk.stem.porter import PorterStemmer
-import itertools
 from operator import add
-from collections import Counter
-
-
 import re, string, unicodedata
-import nltk
-import contractions
 import inflect
-from bs4 import BeautifulSoup
 from nltk import word_tokenize, sent_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import LancasterStemmer, WordNetLemmatizer
+
 '''
 1. read all files in 1 RDD:  (filename,Entire_text_from_file)
 2. convert each (k,v) pair from unicode to String from RDD
@@ -35,6 +25,7 @@ from nltk.stem import LancasterStemmer, WordNetLemmatizer
 ## Constants
 APP_NAME = " InvertedIndex"
 
+
 def remove_non_ascii(words):
     """Remove non-ASCII characters from list of tokenized words"""
     new_words = []
@@ -42,6 +33,7 @@ def remove_non_ascii(words):
         new_word = unicodedata.normalize('NFKD', word).encode('ascii', 'ignore').decode('utf-8', 'ignore')
         new_words.append(new_word)
     return new_words
+
 
 def to_lowercase(words):
     """Convert all characters to lowercase from list of tokenized words"""
@@ -51,6 +43,7 @@ def to_lowercase(words):
         new_words.append(new_word)
     return new_words
 
+
 def remove_punctuation(words):
     """Remove punctuation from list of tokenized words"""
     new_words = []
@@ -59,6 +52,7 @@ def remove_punctuation(words):
         if new_word != '':
             new_words.append(new_word)
     return new_words
+
 
 def replace_numbers(words):
     """Replace all interger occurrences in list of tokenized words with textual representation"""
@@ -72,6 +66,7 @@ def replace_numbers(words):
             new_words.append(word)
     return new_words
 
+
 def remove_stopwords(words):
     """Remove stop words from list of tokenized words"""
     new_words = []
@@ -79,6 +74,7 @@ def remove_stopwords(words):
         if word not in stopwords.words('english'):
             new_words.append(word)
     return new_words
+
 
 def stem_words(words):
     """Stem words in list of tokenized words"""
@@ -89,6 +85,7 @@ def stem_words(words):
         stems.append(stem)
     return stems
 
+
 def lemmatize_verbs(words):
     """Lemmatize verbs in list of tokenized words"""
     lemmatizer = WordNetLemmatizer()
@@ -98,6 +95,7 @@ def lemmatize_verbs(words):
         lemmas.append(lemma)
     return lemmas
 
+
 def normalize(words):
     words = remove_non_ascii(words)
     words = to_lowercase(words)
@@ -106,7 +104,8 @@ def normalize(words):
     words = remove_stopwords(words)
     return words
 
-#------------------------------------------
+
+# ------------------------------------------
 
 def uni_to_clean_str(text):
     converted_str = text.encode('utf-8')
@@ -117,11 +116,11 @@ def tokenize_to_words(text):
     # split into words
     tokens = word_tokenize(text)
     # remove punctuation from each word
-    #table = str.maketrans(",", string.punctuation)
-    #stripped = [w.translate(table) for w in tokens]
+    # table = str.maketrans(",", string.punctuation)
+    # stripped = [w.translate(table) for w in tokens]
     # remove all tokens that are not alphabetic
     words = [word for word in tokens if word.isalpha()]
-    stemmed_words=stemmer(words)
+    stemmed_words = stemmer(words)
     return remove_stopwords(stemmed_words)
 
 
@@ -131,53 +130,90 @@ def remove_stopwords(words):
     words = [w for w in words if not w in stop_words]
     return words
 
+
 # stemming of words
 def stemmer(tokens):
     porter = PorterStemmer()
     stemmed = [porter.stem(word).encode('utf-8') for word in tokens]
     return stemmed
 
-def token_to_doc(token_list,doc_name):
-    token_to_doc_map=[ (token,[doc_name])for token in token_list]
+
+def token_to_doc(token_list, doc_name):
+    token_to_doc_map = [(token[1], [(doc_name,[token[0]])]) for token in token_list]
     return token_to_doc_map
 
 
+#[('f1.txt', [0]), ('f2.txt', [3]), ('f2.txt', [4])]
+
+#[('f1.txt', [0]), ('f2.txt', [3,4])]
+
+def compress_positions(index_line):
+    posting_list=index_line[1]
+    word_pos_dict=dict()
+    for tuple in posting_list:
+        try:
+            word_pos_dict[tuple[0]].append(tuple[1][0])
+        except:
+            word_pos_dict[tuple[0]]=tuple[1]
+    return (index_line[0],list(word_pos_dict.items()))
+
+def enumerate_tokens_pos(word_list, doc_name):
+    return (list(enumerate(word_list)), doc_name)
+
 # Start buildIndex Function
-def buildInvertedIndex(sc, inputFiles, stop_words_list):
+def buildInvertedIndex(sc, inputFiles):
     inputFiles_rdd = sc.wholeTextFiles(inputFiles)
-    #pprint(inputFiles_rdd.collect())
+    pprint.pprint(inputFiles_rdd.collect())
 
-    #convert each fileName and its text from UNICODE to string
-    unicode_to_str_rdd = inputFiles_rdd.map(lambda (x, y): (uni_to_clean_str(y),uni_to_clean_str(x).split('shakespeare/')[1]))
-    #pprint(unicode_to_str_rdd.collect())
+    # convert each fileName and its text from UNICODE to string
+    unicode_to_str_rdd = inputFiles_rdd.map(
+        lambda (x, y): (uni_to_clean_str(y), uni_to_clean_str(x).split('shakespeare/')[1]))
+    # pprint(unicode_to_str_rdd.collect())
 
-    cleanInputRDD=unicode_to_str_rdd.map(lambda (x, y):(tokenize_to_words(x),y))
+    cleanInputRDD = unicode_to_str_rdd.map(lambda (x, y): (tokenize_to_words(x), y))
     #pprint(cleanInputRDD.collect())
 
-    line_enum_rdd= cleanInputRDD.flatMap(lambda (word_list,doc_name):token_to_doc(word_list,doc_name))\
-                                .reduceByKey(add)
+    word_enum_rdd=cleanInputRDD.map(lambda (word_list, doc_name): enumerate_tokens_pos(word_list, doc_name))
+    pprint.pprint(word_enum_rdd.collect())
 
-    term_freq_posting_rdd= line_enum_rdd.map(lambda (x,y): (x,len(y),y))
+    line_enum_rdd = word_enum_rdd.flatMap(lambda (word_list, doc_name): token_to_doc(word_list, doc_name))\
+        .reduceByKey(add)\
+        .sortByKey()
+
+    compressed_pos_rdd=line_enum_rdd.map(lambda index_line:compress_positions(index_line))
+    pprint.pprint(compressed_pos_rdd.collect())
+
+'''
+ line_enum_rdd = cleanInputRDD.flatMap(lambda (word_list, doc_name): token_to_doc(word_list, doc_name)) \
+        .reduceByKey(add)\
+        .sortByKey()
+
+    pprint(line_enum_rdd.collect())
+
+    term_freq_posting_rdd = line_enum_rdd.map(lambda (x, y): (x, len(y), y))
     pprint(term_freq_posting_rdd.collect())
 
+'''
 
-    #cleanInputRDD=unicode_to_str_rdd.map(lambda (x, y):(x.split('shakespeare/')[1],tokenize_to_words(y)))
-    #pprint(cleanInputRDD.collect())
+    # cleanInputRDD=unicode_to_str_rdd.map(lambda (x, y):(x.split('shakespeare/')[1],tokenize_to_words(y)))
+    # pprint(cleanInputRDD.collect())
 
-    #line_enum_rdd=cleanInputRDD.map(lambda (x, y):(y,x))
-    #pprint(line_enum_rdd.collect())
+    # line_enum_rdd=cleanInputRDD.map(lambda (x, y):(y,x))
+    # pprint(line_enum_rdd.collect())
 
-    #line_enum_rdd=cleanInputRDD.flatMap(lambda (x, y):map(lambda word: (word,[x]),y))
-    #pprint(line_enum_rdd.collect())
-    #pprint(line_enum_rdd.reduceByKey(add).collect())
+    # line_enum_rdd=cleanInputRDD.flatMap(lambda (x, y):map(lambda word: (word,[x]),y))
+    # pprint(line_enum_rdd.collect())
+    # pprint(line_enum_rdd.reduceByKey(add).collect())
 
-    #term_freq_rdd = line_enum_rdd.reduceByKey(add).map(lambda (x,y):((x,len(y)),y))
-    #pprint(term_freq_rdd.collect())
+    # term_freq_rdd = line_enum_rdd.reduceByKey(add).map(lambda (x,y):((x,len(y)),y))
+    # pprint(term_freq_rdd.collect())
 
-    #final_postings_rdd = term_freq_rdd.flatmap(lambda (x, y):(x, list(dict.fromkeys(y))))
-    #pprint(final_postings_rdd.collect())
-    #mapping_rdd=line_enum_rdd.flatMap(lambda ((lno, line), fname): map(lambda word: ((word, fname), lno), (line.split())))
-    #pprint(mapping_rdd.collect())
+    # final_postings_rdd = term_freq_rdd.flatmap(lambda (x, y):(x, list(dict.fromkeys(y))))
+    # pprint(final_postings_rdd.collect())
+    # mapping_rdd=line_enum_rdd.flatMap(lambda ((lno, line), fname): map(lambda word: ((word, fname), lno), (line.split())))
+    # pprint(mapping_rdd.collect())
+
+
 '''
     filename_and_tokens_rdd = line_enum_rdd.map(lambda (x, y):(x,map(lambda line: tokenize_to_words(line),y)))
     #pprint(filename_and_tokens_rdd.collect())
@@ -217,8 +253,6 @@ def buildInvertedIndex(sc, inputFiles, stop_words_list):
 
     pprint(inverted_index_rdd.collect())'''
 
-
-
 # Configuration file
 if __name__ == "__main__":
     # Configuration for Spark
@@ -227,19 +261,6 @@ if __name__ == "__main__":
     sc = SparkContext(conf=conf)
     inputFiles = "../../data/Shakespeare*"
     stop_words = set(stopwords.words('english'))
-    '''
-    >>> set(stopwords.words('english'))
-    {'ourselves', 'hers', 'between', 'yourself', 'but', 'again', 'there', 'about', 'once', 'during', 'out', 'very', 
-    'having', 'with', 'they', 'own', 'an', 'be', 'some', 'for', 'do', 'its', 'yours', 'such', 'into', 'of', 'most', 
-    'itself', 'other', 'off', 'is', 's', 'am', 'or', 'who', 'as', 'from', 'him', 'each', 'the', 'themselves', 'until',
-    'below', 'are', 'we', 'these', 'your', 'his', 'through', 'don', 'nor', 'me', 'were', 'her', 'more', 'himself', 
-    'this', 'down', 'should', 'our', 'their', 'while', 'above', 'both', 'up', 'to', 'ours', 'had', 'she', 'all', 'no',
-    'when', 'at', 'any', 'before', 'them', 'same', 'and', 'been', 'have', 'in', 'will', 'on', 'does', 'yourselves', 
-    'then', 'that', 'because', 'what', 'over', 'why', 'so', 'can', 'did', 'not', 'now', 'under', 'he', 'you', 
-    'herself', 'has', 'just', 'where', 'too', 'only', 'myself', 'which', 'those', 'i', 'after', 'few', 'whom', 
-    't', 'being', 'if', 'theirs', 'my', 'against', 'a', 'by', 'doing', 'it', 'how', 'further', 'was', 'here', 
-    'than'}
-    '''
     # stop_words.add("be","me")
     # Start Building Inverted Index
-    buildInvertedIndex(sc, inputFiles, stop_words)
+    buildInvertedIndex(sc, inputFiles)
