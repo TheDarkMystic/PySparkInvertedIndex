@@ -1,6 +1,6 @@
 ## Import libraries
 
-import string
+
 import pprint
 from pyspark import SparkConf, SparkContext
 from pyspark.sql.functions import *
@@ -126,8 +126,8 @@ def tokenize_to_words(text):
 
 def remove_stopwords(words):
     # filter out stop words
-    stop_words = set(stopwords.words('english'))
-    words = [w for w in words if not w in stop_words]
+    stop_words_list = set(stopwords.words('english'))
+    words = [w for w in words if w not in stop_words_list]
     return words
 
 
@@ -139,119 +139,58 @@ def stemmer(tokens):
 
 
 def token_to_doc(token_list, doc_name):
-    token_to_doc_map = [(token[1], [(doc_name,[token[0]])]) for token in token_list]
+    token_to_doc_map = [(token[1], [(doc_name, [token[0]])]) for token in token_list]
     return token_to_doc_map
 
 
-#[('f1.txt', [0]), ('f2.txt', [3]), ('f2.txt', [4])]
+# [('f1.txt', [0]), ('f2.txt', [3]), ('f2.txt', [4])]
 
-#[('f1.txt', [0]), ('f2.txt', [3,4])]
+# [('f1.txt', [0]), ('f2.txt', [3,4])]
 
 def compress_positions(index_line):
-    posting_list=index_line[1]
-    word_pos_dict=dict()
-    for tuple in posting_list:
+    posting_list = index_line[1]
+    word_pos_dict = dict()
+    for doc_pos_tuple in posting_list:
         try:
-            word_pos_dict[tuple[0]].append(tuple[1][0])
+            word_pos_dict[doc_pos_tuple[0]].append(doc_pos_tuple[1][0])
         except:
-            word_pos_dict[tuple[0]]=tuple[1]
-    return (index_line[0],list(word_pos_dict.items()))
+            word_pos_dict[doc_pos_tuple[0]] = doc_pos_tuple[1]
+    return index_line[0], list(word_pos_dict.items())
+
 
 def enumerate_tokens_pos(word_list, doc_name):
-    return (list(enumerate(word_list)), doc_name)
+    return list(enumerate(word_list)), doc_name
+
 
 # Start buildIndex Function
 def buildInvertedIndex(sc, inputFiles):
     inputFiles_rdd = sc.wholeTextFiles(inputFiles)
-    pprint.pprint(inputFiles_rdd.collect())
+    # pprint.pprint(inputFiles_rdd.collect())
 
+    inputFiles_rdd_partitioned = inputFiles_rdd.repartition(4);
     # convert each fileName and its text from UNICODE to string
-    unicode_to_str_rdd = inputFiles_rdd.map(
+    unicode_to_str_rdd = inputFiles_rdd_partitioned.map(
         lambda (x, y): (uni_to_clean_str(y), uni_to_clean_str(x).split('shakespeare/')[1]))
     # pprint(unicode_to_str_rdd.collect())
 
     cleanInputRDD = unicode_to_str_rdd.map(lambda (x, y): (tokenize_to_words(x), y))
-    #pprint(cleanInputRDD.collect())
-
-    word_enum_rdd=cleanInputRDD.map(lambda (word_list, doc_name): enumerate_tokens_pos(word_list, doc_name))
-    pprint.pprint(word_enum_rdd.collect())
-
-    line_enum_rdd = word_enum_rdd.flatMap(lambda (word_list, doc_name): token_to_doc(word_list, doc_name))\
-        .reduceByKey(add)\
-        .sortByKey()
-
-    compressed_pos_rdd=line_enum_rdd.map(lambda index_line:compress_positions(index_line))
-    pprint.pprint(compressed_pos_rdd.collect())
-
-'''
- line_enum_rdd = cleanInputRDD.flatMap(lambda (word_list, doc_name): token_to_doc(word_list, doc_name)) \
-        .reduceByKey(add)\
-        .sortByKey()
-
-    pprint(line_enum_rdd.collect())
-
-    term_freq_posting_rdd = line_enum_rdd.map(lambda (x, y): (x, len(y), y))
-    pprint(term_freq_posting_rdd.collect())
-
-'''
-
-    # cleanInputRDD=unicode_to_str_rdd.map(lambda (x, y):(x.split('shakespeare/')[1],tokenize_to_words(y)))
     # pprint(cleanInputRDD.collect())
 
-    # line_enum_rdd=cleanInputRDD.map(lambda (x, y):(y,x))
-    # pprint(line_enum_rdd.collect())
+    word_enum_rdd = cleanInputRDD.map(lambda (word_list, doc_name): enumerate_tokens_pos(word_list, doc_name))
+    # pprint.pprint(word_enum_rdd.collect())
 
-    # line_enum_rdd=cleanInputRDD.flatMap(lambda (x, y):map(lambda word: (word,[x]),y))
-    # pprint(line_enum_rdd.collect())
-    # pprint(line_enum_rdd.reduceByKey(add).collect())
+    line_enum_rdd = word_enum_rdd.flatMap(lambda (word_list, doc_name): token_to_doc(word_list, doc_name)) \
+        .reduceByKey(add) \
+        .sortByKey()
 
-    # term_freq_rdd = line_enum_rdd.reduceByKey(add).map(lambda (x,y):((x,len(y)),y))
-    # pprint(term_freq_rdd.collect())
-
-    # final_postings_rdd = term_freq_rdd.flatmap(lambda (x, y):(x, list(dict.fromkeys(y))))
-    # pprint(final_postings_rdd.collect())
-    # mapping_rdd=line_enum_rdd.flatMap(lambda ((lno, line), fname): map(lambda word: ((word, fname), lno), (line.split())))
-    # pprint(mapping_rdd.collect())
+    compressed_pos_rdd = line_enum_rdd.map(lambda index_line: compress_positions(index_line))
+    # There is a PairRDD function named "collectAsMap" that returns a dictionary from a RDD.
+    pprint.pprint(compressed_pos_rdd.collectAsMap())
 
 
-'''
-    filename_and_tokens_rdd = line_enum_rdd.map(lambda (x, y):(x,map(lambda line: tokenize_to_words(line),y)))
-    #pprint(filename_and_tokens_rdd.collect())
+    # final Inverted Index
+    compressed_pos_rdd.coalesce(1).saveAsTextFile("../../InvertedIndexFile/")
 
-
-    stopword_removed_rdd=filename_and_tokens_rdd.map(lambda (x,y): (x, map(lambda token_list:remove_stopwords(token_list),y)))
-    #pprint(stopword_removed_rdd.collect())
-
-    stemmed_rdd=stopword_removed_rdd.map(lambda (x,y): (x, map(lambda token_list:stemmer(token_list),y)))
-    #pprint(stemmed_rdd.collect())
-
-    file_to_words_flatmapped_rdd=stemmed_rdd.map(lambda(x,y):(x,list(itertools.chain.from_iterable(y))))
-    #pprint(file_to_words_flatmapped_rdd.collect())
-
-    enumerate_word_per_file_rdd=file_to_words_flatmapped_rdd.map(lambda(x,y):(x, Counter(y).items()))
-    pprint(enumerate_word_per_file_rdd.collect())
-
-    word_file_mapping_rdd=enumerate_word_per_file_rdd.map(lambda (x,y):(y,x))
-    pprint(word_file_mapping_rdd.collect())
-
-    each_word_file_rdd=word_file_mapping_rdd.map(lambda x,y: (tuple,y) for tuple in (x))
-
-'''
-'''
-
-    
-    #input_file_lineOffset = cleanRDD.flatMap(lambda (x, y): map(lambda line: (line, x.split('invertedindex', 1)[1]), enumerate(y.split('\n'), 1)))
-    input_file_lineOffset = cleanRDD.flatMap(
-        lambda (x, y): map(lambda line: (line, x.split('shakespeare', 1)[1]), enumerate(y.split('\n'), 1))) \
-        .flatMap(lambda ((lno, line), fname): map(lambda word: ((word, fname), lno), (line.split()))).groupByKey() \
-        .mapValues(set).mapValues(list)
-    pprint(input_file_lineOffset.collect())
-
-    # aggregate word offset List in the searchable format
-    inverted_index_rdd = input_file_lineOffset.map(lambda ((wrd, fname), lst): ((wrd), ((fname, lst)))) \
-        .groupByKey().mapValues(list)
-
-    pprint(inverted_index_rdd.collect())'''
 
 # Configuration file
 if __name__ == "__main__":

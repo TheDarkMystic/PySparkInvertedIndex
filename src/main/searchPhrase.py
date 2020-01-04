@@ -4,7 +4,14 @@ from pyspark import SparkConf, SparkContext
 
 import ast
 import itertools
+import pprint
+from pyspark import SparkConf, SparkContext
 from pyspark.sql.functions import *
+from nltk.stem.porter import PorterStemmer
+
+from nltk import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+
 
 ## Constants
 APP_NAME = "Search Inverted Index"
@@ -73,12 +80,12 @@ def clean_query(query_line):
 
 
 # main Function
-def searchQueries(sc, invertedIndex, list_of_queries, stop_words_list):
+def searchQueries(sc, invertedIndex, list_of_queries):
     # read query input line-by-line from file
-    query_list_rdd = sc.textFile(query_path)
+    query_list_rdd = sc.textFile(list_of_queries)
 
     # read Inverted index from file
-    inverted_index_rdd = sc.textFile(filename).map(lambda x: ast.literal_eval(x))
+    inverted_index_rdd = sc.textFile(invertedIndex).map(lambda x: ast.literal_eval(x))
 
     # Below commented code can be used for printing the search output in the form of textfiles
     # create output file
@@ -109,11 +116,8 @@ if __name__ == "__main__":
     sc = SparkContext(conf=conf)
 
     # Path of Inverted Index
-    invertedIndex = "/usr/local/spark/singleIndex/*"
+    invertedIndex = "../../InvertedIndexFile/part-00000"
     # Path of file containing SearchQueries
-    list_of_queries = "/usr/local/spark/debugIIInput/queryInput"
-    # List of Stop Words
-    stop_words_list = ['the', '.', '!', '?', ',', 'that', 'to', 'as', 'there', 'has', 'and', 'or', 'is', 'not', 'a',
-                       'of', 'but', 'in', 'by', 'on', 'are', 'it', 'if', 'only', 'any', 'was', 'were', 'an']
+    list_of_queries = "../../searchQueryList/queryList.txt"
     # Call to searchQueries Function
-    searchQueries(sc, invertedIndex, list_of_queries, stop_words_list)
+    searchQueries(sc, invertedIndex, list_of_queries)
